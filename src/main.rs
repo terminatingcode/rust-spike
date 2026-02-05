@@ -1,17 +1,32 @@
-use async_graphql::*;
-use graphql::Query;
+use async_graphql::{Schema, EmptyMutation, EmptySubscription, http::GraphiQLSource};
+use models::Query;
+use async_graphql_actix_web::GraphQL;
+use actix_web::{web, App, HttpServer, HttpResponse, HttpRequest, guard, Result};
 
-mod graphql;
+mod models;
 
-fn main() {
-    println!("Hello, world!");
-    trpl::run(async {
-        let schema = Schema::new(Query, EmptyMutation, EmptySubscription);
-        let res = schema.execute("{ merchants { id name description} }").await;
+async fn index_graphiql() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(GraphiQLSource::build().endpoint("/").finish()))
+}
 
-        let json = serde_json::to_string(&res);
-        println!("{}", json.unwrap());
-    });
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    println!("GraphiQL IDE: http://localhost:8000");
 
-    println!("Goodbye, world!");
+    HttpServer::new(move || {
+        let schema = Schema::build(Query, EmptyMutation, EmptySubscription)
+            .finish();
+        App::new()
+            .service(
+                web::resource("/")
+                .guard(guard::Post())
+                .to(GraphQL::new(schema.clone()))
+            )
+            .service(web::resource("/").guard(guard::Get()).to(index_graphiql))
+    })
+    .bind("127.0.0.1:8000")?
+    .run()
+    .await
 }

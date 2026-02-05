@@ -14,7 +14,7 @@ struct Merchant {
 
 pub struct Query;
 
-#[Object]
+#[async_graphql::Object]
 impl Query {
     async fn merchants(&self) -> Vec<Merchant> {
         vec![
