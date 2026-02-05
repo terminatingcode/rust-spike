@@ -1,0 +1,2 @@
+# Minimum supported Rust version for Clippy checks
+msrv = "1.70"

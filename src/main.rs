@@ -1,7 +1,7 @@
-use async_graphql::{Schema, EmptyMutation, EmptySubscription, http::GraphiQLSource};
-use models::Query;
+use actix_web::{App, HttpResponse, HttpServer, Result, guard, web};
+use async_graphql::{EmptyMutation, EmptySubscription, Schema, http::GraphiQLSource};
 use async_graphql_actix_web::GraphQL;
-use actix_web::{web, App, HttpServer, HttpResponse, HttpRequest, guard, Result};
+use models::Query;
 
 mod models;
 
@@ -16,13 +16,12 @@ async fn main() -> std::io::Result<()> {
     println!("GraphiQL IDE: http://localhost:8000");
 
     HttpServer::new(move || {
-        let schema = Schema::build(Query, EmptyMutation, EmptySubscription)
-            .finish();
+        let schema = Schema::build(Query, EmptyMutation, EmptySubscription).finish();
         App::new()
             .service(
                 web::resource("/")
-                .guard(guard::Post())
-                .to(GraphQL::new(schema.clone()))
+                    .guard(guard::Post())
+                    .to(GraphQL::new(schema.clone())),
             )
             .service(web::resource("/").guard(guard::Get()).to(index_graphiql))
     })
