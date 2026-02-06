@@ -1,9 +1,11 @@
+use std::time::SystemTime;
+
 use actix_web::{App, HttpResponse, HttpServer, Result, guard, web};
 use async_graphql::{EmptyMutation, EmptySubscription, Schema, http::GraphiQLSource};
 use async_graphql_actix_web::GraphQL;
 use aws_config::Region;
 use aws_sdk_dynamodb::{Error, types::AttributeValue};
-use models::{Query, Merchant};
+use models::{Merchant, Query};
 
 mod models;
 
@@ -15,7 +17,6 @@ async fn index_graphiql() -> Result<HttpResponse> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-
     tracing_subscriber::fmt::init();
 
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
@@ -63,7 +64,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn create_merchant_table(client: &aws_sdk_dynamodb::Client) {
-        let create_resp = client
+    let create_resp = client
         .create_table()
         .table_name("merchants")
         .key_schema(
@@ -98,9 +99,15 @@ async fn create_merchant_table(client: &aws_sdk_dynamodb::Client) {
             num_employees: 100,
             vat_number: "VAT123456".to_string(),
             description: "A sample merchant 3".to_string(),
+            created_at: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
         },
         &"merchants".to_string(),
-    ).await.expect("Failed to add merchant");
+    )
+    .await
+    .expect("Failed to add merchant");
 
     let _add_resp = add_merchant(
         client,
@@ -112,9 +119,15 @@ async fn create_merchant_table(client: &aws_sdk_dynamodb::Client) {
             num_employees: 100,
             vat_number: "VAT654321".to_string(),
             description: "A sample merchant 2".to_string(),
+            created_at: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
         },
         &"merchants".to_string(),
-    ).await.expect("Failed to add merchant");
+    )
+    .await
+    .expect("Failed to add merchant");
 
     let _add_resp = add_merchant(
         client,
@@ -126,13 +139,22 @@ async fn create_merchant_table(client: &aws_sdk_dynamodb::Client) {
             num_employees: 100,
             vat_number: "VAT234567".to_string(),
             description: "A sample merchant 3".to_string(),
+            created_at: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
         },
         &"merchants".to_string(),
-    ).await.expect("Failed to add merchant");
-
+    )
+    .await
+    .expect("Failed to add merchant");
 }
 
-async fn add_merchant(client: &aws_sdk_dynamodb::Client, merchant: Merchant, table: &String) -> Result<(), Error> {
+async fn add_merchant(
+    client: &aws_sdk_dynamodb::Client,
+    merchant: Merchant,
+    table: &String,
+) -> Result<(), Error> {
     let id_av = AttributeValue::S(merchant.id);
     let name_av = AttributeValue::S(merchant.name);
     let founded_date_av = AttributeValue::S(merchant.founded_date);
@@ -140,7 +162,7 @@ async fn add_merchant(client: &aws_sdk_dynamodb::Client, merchant: Merchant, tab
     let num_employees_av = AttributeValue::N(merchant.num_employees.to_string());
     let vat_number_av = AttributeValue::S(merchant.vat_number);
     let description_av = AttributeValue::S(merchant.description);
-
+    let created_at_av = AttributeValue::N(merchant.created_at.to_string());
     let request = client
         .put_item()
         .table_name(table)
@@ -150,11 +172,10 @@ async fn add_merchant(client: &aws_sdk_dynamodb::Client, merchant: Merchant, tab
         .item("industry", industry_av)
         .item("num_employees", num_employees_av)
         .item("vat_number", vat_number_av)
-        .item("description", description_av);
-
+        .item("description", description_av)
+        .item("created_at", created_at_av);
     println!("Executing request [{request:?}] to add item...");
 
     request.send().await?;
     Ok(())
 }
-
