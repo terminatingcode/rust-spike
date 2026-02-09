@@ -1,12 +1,12 @@
+use crate::dynamo::{init_merchants, init_transactions};
 use actix_web::{App, HttpResponse, HttpServer, Result, guard, web};
 use async_graphql::{EmptyMutation, EmptySubscription, Schema, http::GraphiQLSource};
 use async_graphql_actix_web::GraphQL;
 use aws_config::Region;
-use models::{ Query};
-use crate::dynamo::{create_merchant_table};
+use models::Query;
 
-mod models;
 mod dynamo;
+mod models;
 
 async fn index_graphiql() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
@@ -36,8 +36,9 @@ async fn main() -> std::io::Result<()> {
                 println!("  {}", name);
             }
             if resp.table_names().is_empty() {
-                println!("No tables found, creating 'merchants' table...");
-                create_merchant_table(&client).await;
+                println!("No tables found, initializing db...");
+                init_merchants(&client).await;
+                init_transactions(&client).await;
             }
         }
         Err(err) => eprintln!("Failed to list local dynamodb tables: {err:?}"),
@@ -56,7 +57,6 @@ async fn main() -> std::io::Result<()> {
                     .to(GraphQL::new(schema.clone())),
             )
             .service(web::resource("/").guard(guard::Get()).to(index_graphiql))
-
     })
     .bind("0.0.0.0:8080")?
     .run()
