@@ -1,19 +1,28 @@
+use std::env;
 use std::time::SystemTime;
 
 use async_graphql::types::connection::{Connection, Edge, EmptyFields, OpaqueCursor, query};
-use async_graphql::{Object, SimpleObject};
+use async_graphql::{Context, Guard, Object, SimpleObject};
 use aws_sdk_dynamodb::types::AttributeValue;
 use serde::{Deserialize, Serialize};
 
 #[derive(SimpleObject, Deserialize, Serialize)]
 pub struct Merchant {
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub id: String,
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub name: String,
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub founded_date: String,
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub industry: String,
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub num_employees: i32,
+    #[graphql(guard = "RoleGuard::new(Role::Admin)")]
     pub vat_number: String,
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub description: String,
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     pub created_at: i64,
 }
 
@@ -24,9 +33,6 @@ impl Merchant {
         before: i64,
         limit: i32,
     ) -> (Result<Vec<Merchant>, aws_sdk_dynamodb::Error>, bool) {
-        println!(
-            "Reading merchants with created_at > {after} and created_at < {before}, limit {limit}"
-        );
         let items_resp = client
             .scan()
             .table_name("merchants")
@@ -108,6 +114,7 @@ pub struct Query;
 
 #[Object]
 impl Query {
+    #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Guest))")]
     async fn merchants(
         &self,
         ctx: &async_graphql::Context<'_>,
@@ -158,5 +165,41 @@ impl Query {
             },
         )
         .await
+    }
+}
+
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+pub enum Role {
+    Admin,
+    Guest,
+}
+
+struct RoleGuard {
+    role: Role,
+}
+
+impl RoleGuard {
+    fn new(role: Role) -> Self {
+        Self { role }
+    }
+}
+
+impl Guard for RoleGuard {
+    async fn check(&self, ctx: &Context<'_>) -> Result<(), async_graphql::Error> {
+        let env_role = env::var("ROLE").ok();
+        let env_role_parsed = env_role.as_deref().and_then(|role_str| {
+            match role_str {
+                "Admin" => Some(Role::Admin),
+                "Guest" => Some(Role::Guest),
+                _ => None,
+            }
+        });
+        
+        if ctx.data_opt::<Role>() == Some(&self.role) || env_role_parsed == Some(self.role) {
+            Ok(())
+        } else {
+            Err("Forbidden".into())
+        }
     }
 }
