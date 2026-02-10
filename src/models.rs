@@ -1,8 +1,10 @@
+use anyhow::{Context, Error};
+use serde_dynamo::aws_sdk_dynamodb_1::from_items;
 use std::env;
 use std::time::SystemTime;
 
 use async_graphql::types::connection::{Connection, Edge, EmptyFields, OpaqueCursor, query};
-use async_graphql::{Context, Enum, Guard, Object, SimpleObject};
+use async_graphql::{Enum, Guard, Object, SimpleObject};
 use aws_sdk_dynamodb::types::AttributeValue;
 use serde::{Deserialize, Serialize};
 use strum_macros::Display;
@@ -33,14 +35,12 @@ impl Merchant {
         after: i64,
         before: i64,
         limit: i32,
-    ) -> (Result<Vec<Merchant>, aws_sdk_dynamodb::Error>, bool) {
+    ) -> Result<(Vec<Merchant>, bool), Error> {
         let items_resp = client
             .scan()
             .table_name("merchants")
             .limit(limit)
-            .filter_expression(
-                "#created_at > :created_at_after AND #created_at < :created_at_before",
-            )
+            .filter_expression("#created_at BETWEEN :created_at_after AND :created_at_before")
             .expression_attribute_names("#created_at", "created_at")
             .expression_attribute_values(":created_at_after", AttributeValue::N(after.to_string()))
             .expression_attribute_values(
@@ -49,60 +49,14 @@ impl Merchant {
             )
             .send()
             .await
-            .map_err(|err| {
-                println!("Error scanning DynamoDB: {err}");
-                err
-            });
+            .context("failed to query merchants")?;
 
-        let items_resp = items_resp.unwrap();
-        let items = items_resp.items.unwrap_or_else(|| Vec::new());
+        if let Some(items) = items_resp.items {
+            let merchants: Vec<Merchant> = from_items(items.to_vec())?;
+            return Ok((merchants, items_resp.last_evaluated_key.is_some()));
+        }
 
-        let merchants = items
-            .into_iter()
-            .map(|item| Merchant {
-                id: item
-                    .get("id")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                name: item
-                    .get("name")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                founded_date: item
-                    .get("founded_date")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                industry: item
-                    .get("industry")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                num_employees: item
-                    .get("num_employees")
-                    .and_then(|attr| attr.as_n().ok())
-                    .and_then(|num_str| num_str.parse::<i32>().ok())
-                    .unwrap_or(0),
-                vat_number: item
-                    .get("vat_number")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                description: item
-                    .get("description")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                created_at: item
-                    .get("created_at")
-                    .and_then(|attr| attr.as_n().ok())
-                    .and_then(|num_str| num_str.parse::<i64>().ok())
-                    .unwrap_or(0),
-            })
-            .collect();
-        (Ok(merchants), items_resp.last_evaluated_key.is_some())
+        Ok((Vec::new(), false))
     }
 }
 
@@ -148,7 +102,7 @@ impl Transaction {
         after: i64,
         before: i64,
         limit: i32,
-    ) -> (Result<Vec<Transaction>, aws_sdk_dynamodb::Error>, bool) {
+    ) -> Result<(Vec<Transaction>, bool), Error> {
         let items_resp = client
             .query()
             .table_name("transactions")
@@ -161,81 +115,14 @@ impl Transaction {
             .expression_attribute_values(":created_at_before", AttributeValue::N(before.to_string()))
             .send()
             .await
-            .map_err(|err| {
-                println!("Error scanning DynamoDB: {err}");
-                err
-            });
+            .context("failed to query transactions")?;
 
-        let items_resp = items_resp.unwrap();
-        let items = items_resp.items.unwrap_or_else(|| Vec::new());
+        if let Some(items) = items_resp.items {
+            let transactions: Vec<Transaction> = from_items(items.to_vec())?;
+            return Ok((transactions, items_resp.last_evaluated_key.is_some()));
+        }
 
-        let transactions = items
-            .into_iter()
-            .map(|item| Transaction {
-                merchant_id: item
-                    .get("merchant_id")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                id: item
-                    .get("id")
-                    .and_then(|attr| attr.as_s().ok())
-                    .unwrap_or(&String::new())
-                    .to_string(),
-                transaction_type: item
-                    .get("transaction_type")
-                    .and_then(|attr| attr.as_s().ok())
-                    .and_then(|type_str| match type_str.as_str() {
-                        "Online" => Some(TransactionType::Online),
-                        "Pos" => Some(TransactionType::Pos),
-                        _ => None,
-                    })
-                    .unwrap_or(TransactionType::Online),
-                status: item
-                    .get("status")
-                    .and_then(|attr| attr.as_s().ok())
-                    .and_then(|status_str| match status_str.as_str() {
-                        "Pending" => Some(TransactionStatus::Pending),
-                        "Successful" => Some(TransactionStatus::Successful),
-                        "Chargeback" => Some(TransactionStatus::Chargeback),
-                        "PaidOut" => Some(TransactionStatus::PaidOut),
-                        _ => None,
-                    })
-                    .unwrap_or(TransactionStatus::Pending),
-                amount: item
-                    .get("amount")
-                    .and_then(|attr| attr.as_n().ok())
-                    .and_then(|num_str| num_str.parse::<f64>().ok())
-                    .unwrap_or(0.0),
-                fees: item
-                    .get("fees")
-                    .and_then(|attr| attr.as_n().ok())
-                    .and_then(|num_str| num_str.parse::<f64>().ok())
-                    .unwrap_or(0.0),
-                pan: item
-                    .get("pan")
-                    .and_then(|attr| attr.as_n().ok())
-                    .and_then(|num_str| num_str.parse::<i64>().ok())
-                    .unwrap_or(0),
-                card_brand: item
-                    .get("card_brand")
-                    .and_then(|attr| attr.as_s().ok())
-                    .and_then(|brand_str| match brand_str.as_str() {
-                        "Visa" => Some(CardBrand::Visa),
-                        "Mastercard" => Some(CardBrand::Mastercard),
-                        "Amex" => Some(CardBrand::Amex),
-                        "Discover" => Some(CardBrand::Discover),
-                        _ => None,
-                    })
-                    .unwrap_or(CardBrand::Visa),
-                created_at: item
-                    .get("created_at")
-                    .and_then(|attr| attr.as_n().ok())
-                    .and_then(|num_str| num_str.parse::<i64>().ok())
-                    .unwrap_or(0),
-            })
-            .collect();
-        (Ok(transactions), items_resp.last_evaluated_key.is_some())
+        Ok((Vec::new(), false))
     }
 }
 
@@ -277,9 +164,8 @@ impl Query {
                 println!("Received pagination parameters: after={after:?}, before={before:?}, first={limit}, last={last:?}");
                 let client: &aws_sdk_dynamodb::Client =
                     ctx.data::<aws_sdk_dynamodb::Client>().unwrap();
-                let (merchants_result, has_more) = Merchant::read_all(client, after.1, before.1, limit)
-                    .await;
-                let merchants = merchants_result.unwrap_or_default();
+                let (merchants, has_more): (Vec<Merchant>, bool) = Merchant::read_all(client, after.1, before.1, limit)
+                    .await?;
                 let mut connection = Connection::new(has_prev_page, has_more);
                 connection.edges = merchants
                     .into_iter()
@@ -330,9 +216,8 @@ impl Query {
                 println!("Received pagination parameters: after={after:?}, before={before:?}, first={limit}, last={last:?}");
                 let client: &aws_sdk_dynamodb::Client =
                     ctx.data::<aws_sdk_dynamodb::Client>().unwrap();
-                let (transaction_result, has_more) = Transaction::read_all(client, merchant_id, after.1, before.1, limit)
-                    .await;
-                let transactions = transaction_result.unwrap_or_default();
+                let (transactions, has_more) = Transaction::read_all(client, merchant_id, after.1, before.1, limit)
+                    .await?;
                 let mut connection = Connection::new(has_prev_page, has_more);
                 connection.edges = transactions
                     .into_iter()
@@ -367,7 +252,7 @@ impl RoleGuard {
 }
 
 impl Guard for RoleGuard {
-    async fn check(&self, ctx: &Context<'_>) -> Result<(), async_graphql::Error> {
+    async fn check(&self, ctx: &async_graphql::Context<'_>) -> Result<(), async_graphql::Error> {
         let env_role = env::var("ROLE").ok();
         let env_role_parsed = env_role.as_deref().and_then(|role_str| match role_str {
             "Admin" => Some(Role::Admin),

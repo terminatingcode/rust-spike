@@ -60,7 +60,7 @@ dependencies = [
  "actix-rt",
  "actix-service",
  "actix-utils",
- "base64",
+ "base64 0.22.1",
  "bitflags",
  "brotli",
  "bytes",
@@ -289,6 +289,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
+
+[[package]]
 name = "ascii_utils"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -318,7 +324,7 @@ dependencies = [
  "async-io",
  "async-trait",
  "asynk-strim",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "fast_chemail",
  "fnv",
@@ -837,6 +843,12 @@ dependencies = [
  "rustc_version",
  "tracing",
 ]
+
+[[package]]
+name = "base64"
+version = "0.21.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "base64"
@@ -1793,7 +1805,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -2616,7 +2628,7 @@ version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-core",
  "http 1.4.0",
@@ -2667,12 +2679,14 @@ name = "rust_spike"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "anyhow",
  "async-graphql",
  "async-graphql-actix-web",
  "aws-config",
  "aws-sdk-dynamodb",
  "rand 0.8.5",
  "serde",
+ "serde_dynamo",
  "serde_json",
  "strum_macros",
  "tracing-subscriber",
@@ -2907,6 +2921,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "serde_dynamo"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "873a97c3f7a67dd042bceb47d056d288424b82d4c66b0a25e1a3b34675620951"
+dependencies = [
+ "aws-sdk-dynamodb",
+ "base64 0.21.7",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
