@@ -1,4 +1,4 @@
-use crate::dynamo::{init_merchants, init_transactions};
+use crate::dynamo::init_db;
 use actix_web::{App, HttpResponse, HttpServer, Result, guard, web};
 use async_graphql::{EmptyMutation, EmptySubscription, Schema, http::GraphiQLSource};
 use async_graphql_actix_web::GraphQL;
@@ -37,8 +37,7 @@ async fn main() -> std::io::Result<()> {
             }
             if resp.table_names().is_empty() {
                 println!("No tables found, initializing db...");
-                init_merchants(&client).await;
-                init_transactions(&client).await;
+                init_db(&client).await;
             }
         }
         Err(err) => eprintln!("Failed to list local dynamodb tables: {err:?}"),
