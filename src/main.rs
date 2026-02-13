@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .test_credentials()
         .region(Region::new("eu-west-1"))
-        .endpoint_url("http://localhost:8000")
+        .endpoint_url("http://db:8000")
         .load()
         .await;
     let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
