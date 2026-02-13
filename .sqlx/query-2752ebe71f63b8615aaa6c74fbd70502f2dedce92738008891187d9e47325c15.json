@@ -1,0 +1,109 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT merchant_id, id, transaction_type as \"transaction_type: TransactionType\", status as \"status: TransactionStatus\", amount, fees, pan, card_brand as \"card_brand: CardBrand\", created_at \n             FROM transactions \n             WHERE merchant_id = $1 AND (created_at < $2 OR (created_at = $2 AND id > $3)) AND (created_at > $4 OR (created_at = $4 AND id < $5))\n             ORDER BY created_at DESC, id ASC\n             LIMIT $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "merchant_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "transaction_type: TransactionType",
+        "type_info": {
+          "Custom": {
+            "name": "transaction_type_enum",
+            "kind": {
+              "Enum": [
+                "online",
+                "pos"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status: TransactionStatus",
+        "type_info": {
+          "Custom": {
+            "name": "transaction_status_enum",
+            "kind": {
+              "Enum": [
+                "pending",
+                "successful",
+                "chargeback",
+                "paid_out"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "amount",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "fees",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "pan",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "card_brand: CardBrand",
+        "type_info": {
+          "Custom": {
+            "name": "card_brand_enum",
+            "kind": {
+              "Enum": [
+                "visa",
+                "mastercard",
+                "amex",
+                "discover"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Int8",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2752ebe71f63b8615aaa6c74fbd70502f2dedce92738008891187d9e47325c15"
+}

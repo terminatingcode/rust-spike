@@ -1,12 +1,11 @@
-use crate::dynamo::init_db;
 use actix_web::{App, HttpResponse, HttpServer, Result, guard, web};
 use async_graphql::{EmptyMutation, EmptySubscription, Schema, http::GraphiQLSource};
 use async_graphql_actix_web::GraphQL;
-use aws_config::Region;
 use models::Query;
+use sqlx::postgres::PgPoolOptions;
 
-mod dynamo;
 mod models;
+mod postgres;
 
 async fn index_graphiql() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
@@ -16,38 +15,32 @@ async fn index_graphiql() -> Result<HttpResponse> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    tracing_subscriber::fmt::init();
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect("postgres://testuser:testpass@db:5432/merchants")
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to connect to Postgres: {}", e);
+            std::io::Error::new(std::io::ErrorKind::Other, "Failed to connect to Postgres")
+        })?;
+    sqlx::migrate!().run(&pool).await.map_err(|e| {
+        eprintln!("Failed to run database migrations: {}", e);
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to run database migrations",
+        )
+    })?;
 
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .test_credentials()
-        .region(Region::new("eu-west-1"))
-        .endpoint_url("http://localhost:8000")
-        .load()
-        .await;
-    let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
-
-    let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
-
-    let list_resp = client.list_tables().send().await;
-    match list_resp {
-        Ok(resp) => {
-            println!("Found {} tables", resp.table_names().len());
-            for name in resp.table_names() {
-                println!("  {}", name);
-            }
-            if resp.table_names().is_empty() {
-                println!("No tables found, initializing db...");
-                init_db(&client).await;
-            }
-        }
-        Err(err) => eprintln!("Failed to list local dynamodb tables: {err:?}"),
-    }
+    postgres::init_db(&pool).await.map_err(|e| {
+        eprintln!("Failed to initialize database: {}", e);
+        std::io::Error::new(std::io::ErrorKind::Other, "Failed to initialize database")
+    })?;
 
     println!("GraphiQL IDE: http://localhost:8080");
 
     HttpServer::new(move || {
         let schema = Schema::build(Query, EmptyMutation, EmptySubscription)
-            .data(client.clone())
+            .data(pool.clone())
             .finish();
         App::new()
             .service(

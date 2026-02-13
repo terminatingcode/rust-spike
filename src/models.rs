@@ -1,14 +1,15 @@
-use crate::dynamo::{get_merchant, get_transactions};
 use anyhow::Error;
+use chrono::{TimeZone, Utc};
 use std::env;
-use std::time::SystemTime;
 
 use async_graphql::types::connection::{Connection, Edge, EmptyFields, OpaqueCursor, query};
 use async_graphql::{Enum, Guard, Object, SimpleObject};
 use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 
-#[derive(SimpleObject, Deserialize, Serialize)]
+use crate::postgres::{get_merchant_by_id, get_transactions_for_merchant};
+
+#[derive(SimpleObject, Deserialize, Serialize, sqlx::FromRow)]
 pub struct Merchant {
     #[graphql(guard = "RoleGuard::new(Role::Admin).or(RoleGuard::new(Role::Reader))")]
     pub id: String,
@@ -28,13 +29,15 @@ pub struct Merchant {
     pub created_at: i64,
 }
 
-#[derive(Enum, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, Display)]
+#[derive(Enum, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, Display, sqlx::Type)]
+#[sqlx(type_name = "transaction_type_enum", rename_all = "snake_case")]
 pub enum TransactionType {
     Online,
     Pos,
 }
 
-#[derive(Enum, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, Display)]
+#[derive(Enum, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, Display, sqlx::Type)]
+#[sqlx(type_name = "transaction_status_enum", rename_all = "snake_case")]
 pub enum TransactionStatus {
     Pending,
     Successful,
@@ -42,7 +45,8 @@ pub enum TransactionStatus {
     PaidOut,
 }
 
-#[derive(Enum, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, Display)]
+#[derive(Enum, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, Display, sqlx::Type)]
+#[sqlx(type_name = "card_brand_enum", rename_all = "snake_case")]
 pub enum CardBrand {
     Visa,
     Mastercard,
@@ -50,7 +54,7 @@ pub enum CardBrand {
     Discover,
 }
 
-#[derive(SimpleObject, Deserialize, Serialize)]
+#[derive(SimpleObject, Deserialize, Serialize, sqlx::FromRow)]
 pub struct Transaction {
     pub merchant_id: String,
     pub id: String,
@@ -58,31 +62,32 @@ pub struct Transaction {
     pub status: TransactionStatus,
     pub amount: f64,
     pub fees: f64,
-    pub pan: i64,
+    pub pan: String,
     pub card_brand: CardBrand,
     pub created_at: i64,
 }
 
 impl Transaction {
     pub async fn read_all(
-        client: &aws_sdk_dynamodb::Client,
+        pool: &sqlx::PgPool,
         merchant_id: String,
-        year: Option<String>,
-        month: Option<String>,
         after: i64,
+        after_id: String,
         before: i64,
-        limit: i32,
+        before_id: String,
+        limit: i64,
     ) -> Result<(Vec<Transaction>, bool), Error> {
-        get_transactions(
-            client,
+        let (transactions, has_more) = get_transactions_for_merchant(
+            pool,
             merchant_id,
-            year.unwrap_or_else(|| "2026".to_string()),
-            month.unwrap_or_default(),
             after,
+            after_id,
             before,
+            before_id,
             limit,
         )
-        .await
+        .await?;
+        Ok((transactions, has_more))
     }
 }
 
@@ -96,16 +101,18 @@ impl Query {
         ctx: &async_graphql::Context<'_>,
         merchant_id: String,
     ) -> Result<Merchant, async_graphql::Error> {
-        let client: &aws_sdk_dynamodb::Client = ctx.data::<aws_sdk_dynamodb::Client>().unwrap();
-        Ok(get_merchant(client, merchant_id).await?)
+        get_merchant_by_id(ctx.data::<sqlx::PgPool>().unwrap(), merchant_id)
+            .await
+            .map_err(|e| {
+                eprintln!("Failed to fetch merchant: {}", e);
+                "Failed to fetch merchant".into()
+            })
     }
 
     async fn transactions(
         &self,
         ctx: &async_graphql::Context<'_>,
         merchant_id: String,
-        year: Option<String>,
-        month: Option<String>,
         after: Option<String>,
         before: Option<String>,
         first: Option<i32>,
@@ -124,20 +131,16 @@ impl Query {
              first: Option<usize>,
              last: Option<usize>| async move {
                 let has_prev_page = after.is_some();
-                let after = after.map(|c| c.0).unwrap_or((String::new(), 0));
-                let before = before.map(|c| c.0).unwrap_or((
+                let before = before.map(|c| c.0).unwrap_or((String::new(), 0));
+                let after = after.map(|c| c.0).unwrap_or((
                     String::new(),
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as i64,
+                    Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).single().unwrap().timestamp_millis(),
                 ));
-                let limit = first.unwrap_or(last.unwrap_or(10)) as i32;
+                let limit = first.unwrap_or(last.unwrap_or(10)) as i64;
                 println!("Received pagination parameters: after={after:?}, before={before:?}, first={limit}, last={last:?}");
-                let client: &aws_sdk_dynamodb::Client =
-                    ctx.data::<aws_sdk_dynamodb::Client>().unwrap();
+                let pool: &sqlx::PgPool = ctx.data::<sqlx::PgPool>().unwrap();
                 let (transactions, has_more) =
-                    Transaction::read_all(client, merchant_id, year, month, after.1, before.1, limit).await?;
+                    Transaction::read_all(pool, merchant_id, after.1, after.0, before.1, before.0, limit).await?;
                 let mut connection = Connection::new(has_prev_page, has_more);
                 connection.edges = transactions
                     .into_iter()

@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO transactions (\n                    merchant_id, id, transaction_type, status, amount, fees, pan, card_brand, created_at, description\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (id) DO NOTHING;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        {
+          "Custom": {
+            "name": "transaction_type_enum",
+            "kind": {
+              "Enum": [
+                "online",
+                "pos"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "transaction_status_enum",
+            "kind": {
+              "Enum": [
+                "pending",
+                "successful",
+                "chargeback",
+                "paid_out"
+              ]
+            }
+          }
+        },
+        "Float8",
+        "Float8",
+        "Varchar",
+        {
+          "Custom": {
+            "name": "card_brand_enum",
+            "kind": {
+              "Enum": [
+                "visa",
+                "mastercard",
+                "amex",
+                "discover"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f7a1d9b4c442ea6c1bbf8fe4577c23775fb5095cd28c0e378dedf02fca8ddb6"
+}
