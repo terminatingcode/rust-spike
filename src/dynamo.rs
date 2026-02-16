@@ -1,7 +1,7 @@
 use crate::models::{CardBrand, Merchant, Transaction, TransactionStatus, TransactionType};
 use anyhow::{Context, Error};
-use aws_sdk_dynamodb::types::{AttributeValue, ScalarAttributeType};
-use chrono::{TimeZone, Utc};
+use aws_sdk_dynamodb::{types::{AttributeValue, ScalarAttributeType}};
+use chrono::{Datelike, TimeZone, Utc};
 use rand::Rng;
 use serde_dynamo::aws_sdk_dynamodb_1::{from_item, from_items};
 use std::{collections::HashMap, time::SystemTime};
@@ -44,7 +44,7 @@ pub async fn init_db(client: &aws_sdk_dynamodb::Client) {
             .expect("Failed to add merchant");
 
         for i in 1..=5 {
-            let date = Utc.with_ymd_and_hms(2026, i, i, 0, 0, 0).unwrap();
+            let date = Utc.with_ymd_and_hms(2025, 2%i+1, i, 0, 0, 0).unwrap();
             add_transaction(
                 client,
                 Transaction {
@@ -197,30 +197,57 @@ async fn add_transaction(
 pub async fn get_transactions(
     client: &aws_sdk_dynamodb::Client,
     merchant_id: String,
-    year: String,
-    month: String,
-    after: i64,
-    before: i64,
+    year: Option<String>,
+    month: Option<String>,
+    day: Option<String>,
+    card_brand: Option<CardBrand>,
+    after_pagination: Option<String>,
+    before_pagination: Option<String>,
     limit: i32,
 ) -> Result<(Vec<Transaction>, bool), anyhow::Error> {
-    let items_resp = client
+    println!("Getting transactions for merchant_id={merchant_id}, after={after_pagination:?}, before={before_pagination:?}, limit={limit}...");
+
+    let (mut earlier_transaction, mut later_transaction) = match (year, month, day) {
+        // daily aggregate
+        (Some(year), Some(month), Some(day)) => (format!("{}#{}-{}-{}", TRANSACTION_PREFIX, year, month, day), format!("{}#{}-{}-{}T99", TRANSACTION_PREFIX, year, month, day)),
+        (_, _, Some(day)) => (format!("{}#{}-{}-{}", TRANSACTION_PREFIX, Utc::now().year().to_string(), Utc::now().month().to_string(), day), format!("{}#{}-{}-{}T99", TRANSACTION_PREFIX, Utc::now().year().to_string(), Utc::now().month().to_string(), day)),
+        // monthly aggregate
+        (Some(year), Some(month), _) => (format!("{}#{}-{}", TRANSACTION_PREFIX, year, month), format!("{}#{}-{}-{}", TRANSACTION_PREFIX, year, month, "99")),
+        (_, Some(month), _) => (format!("{}#{}-{}", TRANSACTION_PREFIX, Utc::now().year().to_string(), month), format!("{}#{}-{}-99", TRANSACTION_PREFIX, Utc::now().year().to_string(), month)),
+        // yearly aggregate
+        (Some(year), None, None) => (format!("{}#{}", TRANSACTION_PREFIX, year), format!("{}#{}-99-99", TRANSACTION_PREFIX, year)),
+        (None, None, None) => (format!("{}#", TRANSACTION_PREFIX), format!("{}#{}-", TRANSACTION_PREFIX, Utc::now().to_rfc3339())),
+    };
+
+    if after_pagination.is_some() &&after_pagination.as_ref().unwrap() <= &later_transaction {
+        later_transaction = after_pagination.unwrap();
+    }
+    if before_pagination.is_some() && before_pagination.as_ref().unwrap() >= &earlier_transaction {
+        earlier_transaction = before_pagination.unwrap();
+    }
+
+    println!("Querying transactions with partition key '{merchant_id}' and sort key between '{earlier_transaction}' and '{later_transaction}'...");
+    let query = client
         .query()
         .table_name(TABLE_NAME)
         .limit(limit)
         .key_condition_expression(
-            "#partition_key = :merchant_id AND begins_with(#sort_key, :transaction_prefix)",
+            "#partition_key = :merchant_id AND #sort_key BETWEEN :earlier_transaction AND :later_transaction",
         )
         .expression_attribute_names("#partition_key", PARTITION_KEY)
         .expression_attribute_names("#sort_key", SORT_KEY)
         .expression_attribute_values(":merchant_id", AttributeValue::S(merchant_id))
-        .expression_attribute_values(
-            ":transaction_prefix",
-            AttributeValue::S(format!("{}#{}-{}", TRANSACTION_PREFIX, year, month)),
-        )
-        .filter_expression("#created_at BETWEEN :created_at_after AND :created_at_before")
-        .expression_attribute_names("#created_at", "created_at")
-        .expression_attribute_values(":created_at_after", AttributeValue::N(after.to_string()))
-        .expression_attribute_values(":created_at_before", AttributeValue::N(before.to_string()))
+        .expression_attribute_values(":earlier_transaction", AttributeValue::S(earlier_transaction))
+        .expression_attribute_values(":later_transaction", AttributeValue::S(later_transaction));
+    let query = if let Some(card_brand) = card_brand {
+        query.filter_expression("#card_brand = :card_brand")
+            .expression_attribute_names("#card_brand", "card_brand")
+            .expression_attribute_values(":card_brand", AttributeValue::S(card_brand.to_string()))
+    } else {
+        query
+    };
+
+    let items_resp = query
         .send()
         .await
         .context("Failed to get transaction")?;

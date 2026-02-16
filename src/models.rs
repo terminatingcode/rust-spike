@@ -1,7 +1,6 @@
 use crate::dynamo::{get_merchant, get_transactions};
 use anyhow::Error;
 use std::env;
-use std::time::SystemTime;
 
 use async_graphql::types::connection::{Connection, Edge, EmptyFields, OpaqueCursor, query};
 use async_graphql::{Enum, Guard, Object, SimpleObject};
@@ -69,15 +68,19 @@ impl Transaction {
         merchant_id: String,
         year: Option<String>,
         month: Option<String>,
-        after: i64,
-        before: i64,
+        day: Option<String>,
+        card_brand: Option<CardBrand>,
+        after: Option<String>,
+        before: Option<String>,
         limit: i32,
     ) -> Result<(Vec<Transaction>, bool), Error> {
         get_transactions(
             client,
             merchant_id,
-            year.unwrap_or_else(|| "2026".to_string()),
-            month.unwrap_or_default(),
+            year,
+            month,
+            day,
+            card_brand,
             after,
             before,
             limit,
@@ -106,12 +109,14 @@ impl Query {
         merchant_id: String,
         year: Option<String>,
         month: Option<String>,
+        day: Option<String>,    
+        card_brand: Option<CardBrand>,
         after: Option<String>,
         before: Option<String>,
         first: Option<i32>,
         last: Option<i32>,
     ) -> Result<
-        Connection<OpaqueCursor<(String, i64)>, Transaction, EmptyFields, EmptyFields>,
+        Connection<OpaqueCursor<String>, Transaction, EmptyFields, EmptyFields>,
         async_graphql::Error,
     > {
         query(
@@ -119,31 +124,26 @@ impl Query {
             before,
             first,
             last,
-            |after: Option<OpaqueCursor<(String, i64)>>,
-             before: Option<OpaqueCursor<(String, i64)>>,
+            |after: Option<OpaqueCursor<String>>,
+             before: Option<OpaqueCursor<String>>,
              first: Option<usize>,
              last: Option<usize>| async move {
                 let has_prev_page = after.is_some();
-                let after = after.map(|c| c.0).unwrap_or((String::new(), 0));
-                let before = before.map(|c| c.0).unwrap_or((
-                    String::new(),
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as i64,
-                ));
+                let after:Option<String> = after.map(|c| c.0);
+                let before = before.map(|c| c.0);
                 let limit = first.unwrap_or(last.unwrap_or(10)) as i32;
-                println!("Received pagination parameters: after={after:?}, before={before:?}, first={limit}, last={last:?}");
+                
                 let client: &aws_sdk_dynamodb::Client =
                     ctx.data::<aws_sdk_dynamodb::Client>().unwrap();
                 let (transactions, has_more) =
-                    Transaction::read_all(client, merchant_id, year, month, after.1, before.1, limit).await?;
+                    Transaction::read_all(client, merchant_id, year, month, day, card_brand, after, before, limit).await?;
                 let mut connection = Connection::new(has_prev_page, has_more);
                 connection.edges = transactions
                     .into_iter()
+                    .rev()
                     .map(|transaction| {
                         Edge::new(
-                            OpaqueCursor((transaction.id.clone(), transaction.created_at.clone())),
+                            OpaqueCursor(transaction.id.clone()),
                             transaction,
                         )
                     })
